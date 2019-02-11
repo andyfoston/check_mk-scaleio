@@ -1,17 +1,93 @@
 #/bin/bash
 
-SCALEIO_SERVERS="scaleio1.example.com scaleio2.example.com scaleio3.example.com"
-SCALEIO_ADMIN_PW="SCALEIO_admin_PASSWORD"
+SCALEIO_SERVERS=""
+SCALEIO_ADMIN_PW=""
+SCALEIO_ADMIN_USER="admin"
 PD_WARN_SPACE=300000000000
 PD_CRIT_SPACE=100000000000
 TMPFILE=/tmp/tmp.services.nagiosdata.scaleio
 OUTFILE=/tmp/services.nagiosdata.scaleio
+UNEXPECTED_ARGS=""
+SHOW_HELP=""
 
+while [[ $# -gt 0 ]]
+do
+  case $1 in
+    -s|--servers)
+      SCALEIO_SERVERS="$(echo $2 | sed 's/,/ /g')"
+      shift
+      shift
+      ;;
+    -u|--user)
+      SCALEIO_ADMIN_USER="$2"
+      shift
+      shift
+      ;;
+    -p|--password)
+      SCALEIO_ADMIN_PW="$2"
+      shift
+      shift
+      ;;
+    -w|--warning)
+      PD_WARN_SPACE="$2"
+      shift
+      shift
+      ;;
+    -c|--critical)
+      PD_CRIT_SPACE="$2"
+      shift
+      shift
+      ;;
+    -h|--help)
+      SHOW_HELP="yes"
+      shift
+      ;;
+    *)
+      UNEXPECTED_ARGS="$UNEXPECTED_ARGS$1 "
+      shift
+      ;;
+  esac
+done
+
+usage() {
+  echo "Usage: $0 --servers server1,user@server2,etc --password adminpassword"
+  echo "  -s or --servers    A comma-seperated list of servers to poll. Can contain SSH usernames using user@server syntax"
+  echo "  -u or --user       The ScaleIO username to authenticate with. Defaults to $SCALEIO_ADMIN_USER"
+  echo "  -p or --password   The ScaleIO password to authenticate with"
+  echo "  -w or --warning    The Warning threshold. Defaults to $PD_WARN_SPACE"
+  echo "  -c or --critical   The Critical threshold. Defaults to $PD_CRIT_SPACE"
+  echo "  -h or --help       Displayes this text and exists"
+  exit 1
+}
+
+check_args() {
+  if [ ${#SHOW_HELP} -gt 0 ]
+  then
+    usage
+  elif [ ${#SCALEIO_SERVERS} -eq 0 ]
+  then
+   echo "-s or --servers must be provided"
+   echo
+   usage
+  elif [ ${#SCALEIO_ADMIN_PW} -eq 0 ]
+  then
+   echo "-p or --password must be provided"
+   echo
+   usage
+  elif [ ${#UNEXPECTED_ARGS} -gt 0 ]
+  then
+   echo "Unexpected args: $UNEXPECTED_ARGS"
+   echo
+   usage
+  fi
+}
+
+check_args
 
 #Find out which server is our current primary MDM
 PRIMARY_SERVER=
 for SERVER in ${SCALEIO_SERVERS}; do
-  OUTPUT=$(ssh ${SERVER} "scli --login --username admin --password ${SCALEIO_ADMIN_PW} 2>/dev/null | grep 'Logged in'") 
+  OUTPUT=$(ssh ${SERVER} "scli --login --username ${SCALEIO_ADMIN_USER} --password ${SCALEIO_ADMIN_PW} 2>/dev/null | grep 'Logged in'") 
   #Error: Failed to connect
   #Logged in. User role is SuperUser. System ID is 78221ddb0dcff2f5
   if [ "$?" == "0" ]; then
