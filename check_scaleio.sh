@@ -57,11 +57,12 @@ done
 usage() {
   echo "Usage: $0 --servers server1,user@server2,etc --password adminpassword"
   echo "  -s or --servers    A comma-seperated list of servers to poll. Can contain SSH usernames using user@server syntax"
+  echo "  -l or --local      Indicates that the scli command should be run on the localhost only"
   echo "  -u or --user       The ScaleIO username to authenticate with. Defaults to $SCALEIO_ADMIN_USER"
   echo "  -p or --password   The ScaleIO password to authenticate with"
   echo "  -w or --warning    The Warning threshold. Defaults to $PD_WARN_SPACE"
   echo "  -c or --critical   The Critical threshold. Defaults to $PD_CRIT_SPACE"
-  echo "  -h or --help       Displayes this text and exists"
+  echo "  -h or --help       Displays this text and exits"
   exit 1
 }
 
@@ -71,7 +72,12 @@ check_args() {
     usage
   elif [ ${#SCALEIO_SERVERS} -eq 0 ] && [ "${LOCAL}" == "" ]
   then
-   echo "-s or --servers must be provided"
+   echo "Either -s/--servers or -l/--local must be supplied."
+   echo
+   usage
+  elif [ ${#SCALEIO_SERVERS} -gt 0 ] && [ "${LOCAL}" == "yes" ]
+  then
+   echo "Either -s/--servers or -l/--local must be supplied. Not both."
    echo
    usage
   elif [ ${#SCALEIO_ADMIN_PW} -eq 0 ]
