@@ -9,6 +9,7 @@ TMPFILE=/tmp/tmp.services.nagiosdata.scaleio
 OUTFILE=/tmp/services.nagiosdata.scaleio
 UNEXPECTED_ARGS=""
 SHOW_HELP=""
+LOCAL=""
 
 while [[ $# -gt 0 ]]
 do
@@ -38,6 +39,10 @@ do
       shift
       shift
       ;;
+    -l|--local)
+      LOCAL="yes"
+      shift
+      ;;
     -h|--help)
       SHOW_HELP="yes"
       shift
@@ -64,7 +69,7 @@ check_args() {
   if [ ${#SHOW_HELP} -gt 0 ]
   then
     usage
-  elif [ ${#SCALEIO_SERVERS} -eq 0 ]
+  elif [ ${#SCALEIO_SERVERS} -eq 0 ] && [ "${LOCAL}" == "" ]
   then
    echo "-s or --servers must be provided"
    echo
@@ -84,19 +89,29 @@ check_args() {
 
 check_args
 
-#Find out which server is our current primary MDM
-PRIMARY_SERVER=
-for SERVER in ${SCALEIO_SERVERS}; do
-  OUTPUT=$(ssh ${SERVER} "scli --login --username ${SCALEIO_ADMIN_USER} --password ${SCALEIO_ADMIN_PW} 2>/dev/null | grep 'Logged in'") 
-  #Error: Failed to connect
-  #Logged in. User role is SuperUser. System ID is 78221ddb0dcff2f5
-  if [ "$?" == "0" ]; then
-    PRIMARY_SERVER=${SERVER}
-    break
+if [ "${LOCAL}" == "" ]
+then
+  #Find out which server is our current primary MDM
+  PRIMARY_SERVER=
+  for SERVER in ${SCALEIO_SERVERS}; do
+    OUTPUT=$(ssh ${SERVER} "scli --login --username ${SCALEIO_ADMIN_USER} --password ${SCALEIO_ADMIN_PW} 2>/dev/null | grep 'Logged in'") 
+    #Error: Failed to connect
+    #Logged in. User role is SuperUser. System ID is 78221ddb0dcff2f5
+    if [ "$?" == "0" ]; then
+      PRIMARY_SERVER=${SERVER}
+      break
+    fi
+  done
+else
+  OUTPUT=$(scli --login --username ${SCALEIO_ADMIN_USER} --password ${SCALEIO_ADMIN_PW} 2>/dev/null | grep 'Logged in')
+  if [ "$?" != "0" ]
+  then
+    echo "Server is not primary"
+    exit 0
   fi
-done
+fi
 
-if [ "${PRIMARY_SERVER}" != "" ]; then
+if [ "${PRIMARY_SERVER}" != "" ] || [ "${LOCAL}" == "yes" ] ; then
 
   > $TMPFILE
 
@@ -105,8 +120,13 @@ if [ "${PRIMARY_SERVER}" != "" ]; then
 ##################################
 ## QUERY ALL
 ##################################
-
-  QUERY_ALL_OUTPUT=$(ssh ${PRIMARY_SERVER} "scli --query_all | sed 's/[()]//g; s/\.[0-9] KB/000 Bytes/g; s/ KB/000 Bytes/g; s/\.[0-9] MB/000000 Bytes/g; s/ MB/000000 Bytes/g; s/\.[0-9] GB/000000000 Bytes/g; s/ GB/000000000 Bytes/g; s/\.[0-9] TB/000000000000 Bytes/g; s/ TB/000000000000 Bytes/g'")
+  if [ "${LOCAL}" == "yes" ]
+  then
+    QUERY_ALL_OUTPUT=$(scli --query_all)
+  else
+    QUERY_ALL_OUTPUT=$(ssh ${PRIMARY_SERVER} "scli --query_all")
+  fi
+  QUERY_ALL_OUTPUT=$(echo "${QUERY_ALL_OUTPUT}" | sed 's/[()]//g; s/\.[0-9] KB/000 Bytes/g; s/ KB/000 Bytes/g; s/\.[0-9] MB/000000 Bytes/g; s/ MB/000000 Bytes/g; s/\.[0-9] GB/000000000 Bytes/g; s/ GB/000000000 Bytes/g; s/\.[0-9] TB/000000000000 Bytes/g; s/ TB/000000000000 Bytes/g')
 
 #[root@scaleio ~]# scli --query_all
 #
@@ -203,9 +223,7 @@ if [ "${PRIMARY_SERVER}" != "" ]; then
 
 #   1        2      3       4      5             6  7  8      9     10   11   12  13  14   15   16  17     18  19             20   21          22    23        24   25      26
 #Protection Domain default Id: 073890cb00000000 has 1 storage pools, 0 Fault Sets, 5 SDS nodes, 23 volumes and 568000000000 Bytes 581632000000 Bytes available for volume allocation
-
   PD_ID=$(echo "${QUERY_ALL_OUTPUT}" | awk 'BEGIN {FS=" "} {if ($1=="Protection" && $2=="Domain") {printf "%s", $5} }' )
-
   #Stop immediately if we can't find a protection domain
   if [ "${PD_ID}" == "" ]; then
     rm -f ${TMPFILE}
@@ -262,13 +280,22 @@ if [ "${PRIMARY_SERVER}" != "" ]; then
 ##################################
 ## QUERY EACH SDS
 ##################################
-
-  SDSS=$(ssh ${PRIMARY_SERVER} "scli --query_all_sds | egrep 'SDS ID: [0-9a-f]{16}' | cut -f 3 -d ' '")
+  if [ "${LOCAL}" == "yes" ]
+  then
+    SDSS=$(scli --query_all_sds | egrep 'SDS ID: [0-9a-f]{16}' | cut -f 3 -d ' ')
+  else
+    SDSS=$(ssh ${PRIMARY_SERVER} "scli --query_all_sds | egrep 'SDS ID: [0-9a-f]{16}' | cut -f 3 -d ' '")
+  fi
 
   for SDS in ${SDSS}
   do
-
-    QUERY_SDS_OUTPUT=$(ssh ${PRIMARY_SERVER} "scli --query_sds --sds_id ${SDS} | sed 's/[()]//g; s/\.[0-9] KB/000 Bytes/g; s/ KB/000 Bytes/g; s/\.[0-9] MB/000000 Bytes/g; s/ MB/000000 Bytes/g; s/\.[0-9] GB/000000000 Bytes/g; s/ GB/000000000 Bytes/g; s/\.[0-9] TB/000000000000 Bytes/g; s/ TB/000000000000 Bytes/g'")
+    if [ "${LOCAL}" == "yes" ]
+    then
+      QUERY_SDS_OUTPUT=$(scli --query_sds --sds_id ${SDS})
+    else
+      QUERY_SDS_OUTPUT=$(ssh ${PRIMARY_SERVER} "scli --query_sds --sds_id ${SDS}")
+    fi
+    QUERY_SDS_OUTPUT=$(echo "${QUERY_SDS_OUTPUT}" | sed 's/[()]//g; s/\.[0-9] KB/000 Bytes/g; s/ KB/000 Bytes/g; s/\.[0-9] MB/000000 Bytes/g; s/ MB/000000 Bytes/g; s/\.[0-9] GB/000000000 Bytes/g; s/ GB/000000000 Bytes/g; s/\.[0-9] TB/000000000000 Bytes/g; s/ TB/000000000000 Bytes/g')
 
 
 #SDS ee7536f900000000 Name: SDS_[224.36.61.59] Version: 2.0.12000
@@ -371,8 +398,14 @@ if [ "${PRIMARY_SERVER}" != "" ]; then
 #################################################################
 ## PARSE EACH SDC FOR BANDWIDTH AND APPROVED AND CONNECTED STATES
 #################################################################
-
-    QUERY_SDC_OUTPUT=$(ssh ${PRIMARY_SERVER} "scli --query_all_sdc | sed '/ID/{N;s/\n//;N;s/\n//}; s/[()]//g; s/\.[0-9] KB/000 Bytes/g; s/ KB/000 Bytes/g; s/\.[0-9] MB/000000 Bytes/g; s/ MB/000000 Bytes/g; s/\.[0-9] GB/000000000 Bytes/g; s/ GB/000000000 Bytes/g; s/\.[0-9] TB/000000000000 Bytes/g; s/ TB/000000000000 Bytes/g'")
+    QUERY_SDC_CMD="scli --query_all_sdc | sed '/ID/{N;s/\n//;N;s/\n//}; s/[()]//g; s/\.[0-9] KB/000 Bytes/g; s/ KB/000 Bytes/g; s/\.[0-9] MB/000000 Bytes/g; s/ MB/000000 Bytes/g; s/\.[0-9] GB/000000000 Bytes/g; s/ GB/000000000 Bytes/g; s/\.[0-9] TB/000000000000 Bytes/g; s/ TB/000000000000 Bytes/g'"
+    if [ "${LOCAL}" == "yes" ]
+    then
+      QUERY_SDC_OUTPUT=$(scli --query_all_sds)
+    else
+      QUERY_SDC_OUTPUT=$(ssh ${PRIMARY_SERVER} "scli --query_all_sds")
+    fi
+    QUERY_SDC_OUTPUT=$(echo "${QUERY_SDC_OUTPUT}" | sed '/ID/{N;s/\n//;N;s/\n//}; s/[()]//g; s/\.[0-9] KB/000 Bytes/g; s/ KB/000 Bytes/g; s/\.[0-9] MB/000000 Bytes/g; s/ MB/000000 Bytes/g; s/\.[0-9] GB/000000000 Bytes/g; s/ GB/000000000 Bytes/g; s/\.[0-9] TB/000000000000 Bytes/g; s/ TB/000000000000 Bytes/g')
 
 #[root@scaleio ~]# scli --query_all_sdc | sed '/ID/{N;s/\n//;N;s/\n//}; s/[()]//g; s/\.[0-9] KB/000 Bytes/g; s/ KB/000 Bytes/g; s/\.[0-9] MB/000000 Bytes/g; s/ MB/000000 Bytes/g; s/\.[0-9] GB/000000000 Bytes/g; s/ GB/000000000 Bytes/g; s/\.[0-9] TB/000000000000 Bytes/g; s/ TB/000000000000 Bytes/g'
 #MDM restricted SDC mode: Enabled
