@@ -10,6 +10,7 @@ OUTFILE=/tmp/services.nagiosdata.scaleio
 UNEXPECTED_ARGS=""
 SHOW_HELP=""
 LOCAL=""
+ASSERT_LIVE=""
 
 while [[ $# -gt 0 ]]
 do
@@ -43,6 +44,10 @@ do
       LOCAL="yes"
       shift
       ;;
+    --assert-live)
+      ASSERT_LIVE="yes"
+      shift
+      ;;
     -h|--help)
       SHOW_HELP="yes"
       shift
@@ -58,6 +63,7 @@ usage() {
   echo "Usage: $0 --servers server1,user@server2,etc --password adminpassword"
   echo "  -s or --servers    A comma-seperated list of servers to poll. Can contain SSH usernames using user@server syntax"
   echo "  -l or --local      Indicates that the scli command should be run on the localhost only"
+  echo "  --assert-live      Assert that the local host is the live ScaleIO node"
   echo "  -u or --user       The ScaleIO username to authenticate with. Defaults to $SCALEIO_ADMIN_USER"
   echo "  -p or --password   The ScaleIO password to authenticate with"
   echo "  -w or --warning    The Warning threshold. Defaults to $PD_WARN_SPACE"
@@ -85,6 +91,11 @@ check_args() {
    echo "-p or --password must be provided"
    echo
    usage
+  elif [ ${#LOCAL} -eq 0 ]  && [ "${ASSERT_LIVE}" == "yes" ]
+  then
+    echo "--assert-live must be used with --local"
+    echo
+    usage
   elif [ ${#UNEXPECTED_ARGS} -gt 0 ]
   then
    echo "Unexpected args: $UNEXPECTED_ARGS"
@@ -112,8 +123,14 @@ else
   OUTPUT=$(scli --login --username ${SCALEIO_ADMIN_USER} --password ${SCALEIO_ADMIN_PW} 2>/dev/null | grep 'Logged in')
   if [ "$?" != "0" ]
   then
-    echo "Server is not primary"
-    exit 0
+    if [ "${ASSERT_LIVE}" == "yes" ]
+    then
+      echo "ScaleIO is not live on this host"
+      exit 2
+    else
+      echo "Server is not primary"
+      exit 0
+    fi
   fi
 fi
 
